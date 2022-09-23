@@ -12,11 +12,15 @@ specifiers:
   '@typescript-eslint/eslint-plugin': 5.38.0
   '@typescript-eslint/parser': 5.38.0
   '@vitejs/plugin-react': 2.1.0
+  ag-grid-community: ^28.1.1
+  ag-grid-enterprise: ^28.1.3
+  ag-grid-react: ^28.1.1
   autoprefixer: 10.4.12
   conventional-changelog-conventionalcommits: 5.0.0
   eslint: 8.23.1
   eslint-plugin-react: 7.31.8
   eslint-plugin-react-hooks: 4.6.0
+  lodash: ^4.17.21
   postcss: 8.4.16
   react: ^18.2.0
   react-dom: ^18.2.0
@@ -28,6 +32,10 @@ specifiers:
 
 dependencies:
   '@logseq/libs': 0.0.9
+  ag-grid-community: 28.1.1
+  ag-grid-enterprise: 28.1.3
+  ag-grid-react: 28.1.1_pjf2xgnsmvlhyglrpausbi765u
+  lodash: 4.17.21
   react: 18.2.0
   react-dom: 18.2.0_react@18.2.0
 
@@ -936,6 +944,27 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
     dev: true
+
+  /ag-grid-community/28.1.1:
+    resolution: {integrity: sha512-WqWELTVXMrFHnyLHhD8HqMzrns+rjMuaOWcnLY+uO+j2jFN9QEasXPdT8zepNbNeUaIdCt1f1Q9Ipx0U1evNvQ==}
+    dev: false
+
+  /ag-grid-enterprise/28.1.3:
+    resolution: {integrity: sha512-eI0OosjndOqyMC3qbz5OIzp0cQqXuYSYtf1Qh0YxebGC4a1qOgzmyNN3NXwU/Xu09UEPNTbPTT0bQ2btoIDZGQ==}
+    dev: false
+
+  /ag-grid-react/28.1.1_pjf2xgnsmvlhyglrpausbi765u:
+    resolution: {integrity: sha512-K1RUWNCKgwxeh6Y4Wb5LD6dVYyAbduH3tAd0ketVcVij2gruLVlvZdtT2HwHjeDvyyp0oqGqZVT2oik6+rZFTQ==}
+    peerDependencies:
+      ag-grid-community: ~28.1.0
+      react: ^16.3.0 || ^17.0.0 || ^18.0.0
+      react-dom: ^16.3.0 || ^17.0.0 || ^18.0.0
+    dependencies:
+      ag-grid-community: 28.1.1
+      prop-types: 15.8.1
+      react: 18.2.0
+      react-dom: 18.2.0_react@18.2.0
+    dev: false
 
   /agent-base/6.0.2:
     resolution: {integrity: sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ==}
@@ -2753,7 +2782,6 @@ packages:
 
   /lodash/4.17.21:
     resolution: {integrity: sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg==}
-    dev: true
 
   /loose-envify/1.4.0:
     resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
@@ -3073,7 +3101,6 @@ packages:
   /object-assign/4.1.1:
     resolution: {integrity: sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==}
     engines: {node: '>=0.10.0'}
-    dev: true
 
   /object-hash/3.0.0:
     resolution: {integrity: sha512-RSn9F68PjH9HqtltsSnqYC1XXoWe9Bju5+213R98cNGttag9q9yAOTzdbsqvIa7aNm5WffBZFpWYr2aWrklWAw==}
@@ -3430,7 +3457,6 @@ packages:
       loose-envify: 1.4.0
       object-assign: 4.1.1
       react-is: 16.13.1
-    dev: true
 
   /pump/3.0.0:
     resolution: {integrity: sha512-LwZy+p3SFs1Pytd/jYct4wpv49HiYCqd9Rlc5ZVdk0V+8Yzv6jR5Blk3TRmPL1ft69TxP0IMZGJ+WPFU2BFhww==}
@@ -3485,7 +3511,6 @@ packages:
 
   /react-is/16.13.1:
     resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
-    dev: true
 
   /react-refresh/0.14.0:
     resolution: {integrity: sha512-wViHqhAd8OHeLS/IRMJjTSDHF3U9eWi62F/MledQGPdJGDhodXJ9PBLNGr6WWL7qlH12Mt3TyTpbS+hGXMjCzQ==}

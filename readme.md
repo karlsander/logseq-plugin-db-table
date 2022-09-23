@@ -1,8 +1,3 @@
-# Logseq Plugin Template React
+# Logseq Plugin DB Table
 
-## Features
-
-- plug & play boilerplate with properly defined GitHub action defaults
-- develop with HMR, empowered by lightning fast Vite ⚡ with [vite-logseq-plugin](https://github.com/pengx17/vite-plugin-logseq)
-- TailwindCSS for styling
-- pnpm
+**Warning**: As of now, this software is not licensed for general use. DO NOT use it without an enterprise license for ag-grid. This is a personal exploration (for now...)
