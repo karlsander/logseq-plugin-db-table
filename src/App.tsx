@@ -11,12 +11,19 @@ import { AgGridReact } from "ag-grid-react";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 
-const query = `[:find (pull ?h [*])
-            :where
-            [?h :block/marker ?marker]
-            [(contains? #{"NOW" "DOING"} ?marker)]]`;
-
-function Table({ columnDefs, rowData }: { columnDefs: any; rowData: any }) {
+function Table({
+  columnDefs,
+  rowData,
+  pinnedRowRef,
+  activeType,
+  refetch,
+}: {
+  columnDefs: any;
+  rowData: any;
+  pinnedRowRef: any;
+  activeType: string;
+  refetch: () => void;
+}) {
   const gridRef = useRef();
 
   const cellClickedListener = useCallback((event) => {
@@ -24,7 +31,6 @@ function Table({ columnDefs, rowData }: { columnDefs: any; rowData: any }) {
   }, []);
 
   const detailCellRenderer = useCallback(({ data, ...rest }) => {
-    console.log(data.block);
     return (
       <div style={{ margin: 8 }}>
         {data.block.content.split("\n").map((paragraph) => (
@@ -34,19 +40,78 @@ function Table({ columnDefs, rowData }: { columnDefs: any; rowData: any }) {
     );
   }, []);
 
+  const getContextMenuItems = useCallback(
+    (params) => {
+      const result = [
+        {
+          name: "!!!! Delete !!!!",
+          action: () => {
+            const isPage = Boolean(params.node.data.block["preBlock?"]);
+
+            if (isPage) {
+              logseq.Editor.deletePage(params.node.data.block.page.name);
+            } else {
+              const id = params.node.data.block.uuid;
+              logseq.Editor.removeBlock(id);
+            }
+            logseq.Editor.exitEditingMode();
+            refetch();
+          },
+        },
+        "separator",
+        "copy",
+        "copyWithHeaders",
+        "copyWithGroupHeaders",
+        "export",
+        //"chartRange",
+      ];
+      return result;
+    },
+    [refetch]
+  );
+
   return (
     <div
-      className="ag-theme-alpine-dark"
-      style={{ width: "100vw", height: "85vh" }}
+      className={
+        window.matchMedia &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "ag-theme-alpine-dark"
+          : "ag-theme-alpine"
+      }
+      style={{ width: "100vw", height: "calc(100vh - 72px)" }}
     >
       <AgGridReact
         //@ts-ignore
+        getContextMenuItems={getContextMenuItems}
         ref={gridRef}
         rowData={rowData}
         rowGroupPanelShow={"always"}
         pivotPanelShow={"always"}
         sideBar={{
           toolPanels: ["columns", "filters"],
+        }}
+        pinnedTopRowData={[pinnedRowRef.current]}
+        onPinnedRowDataChanged={(...args) => {
+          console.log("pinnedRowDataChanged", args);
+        }}
+        onCellKeyPress={(e) => {
+          if (e?.event?.keyCode === 13 && e?.rowPinned) {
+            const { blockTitle, ...rest } = pinnedRowRef.current;
+            const text =
+              `${blockTitle}\n` +
+              `is:: [[${activeType}]]\n` +
+              Object.keys(rest)
+                .map((k) => `${k}:: ${rest[k]}`)
+                .join("\n");
+            logseq.Editor.appendBlockInPage(activeType, text).then(() => {
+              refetch();
+              pinnedRowRef.current = {};
+              gridRef?.current?.api?.setPinnedTopRowData([
+                pinnedRowRef.current,
+              ]);
+              logseq.Editor.exitEditingMode();
+            });
+          }
         }}
         defaultColDef={{
           resizable: true,
@@ -79,74 +144,179 @@ function Table({ columnDefs, rowData }: { columnDefs: any; rowData: any }) {
   );
 }
 
+function useQuery(dsl: string) {
+  const [data, setData] = useState<any[]>();
+  const refetch = useCallback(() => {
+    logseq.DB.q(dsl).then((data) => {
+      //@ts-ignore
+      setData(data);
+    });
+  }, [dsl]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+  return { data, refetch };
+}
+
+function DataTable({
+  data,
+  refetch,
+  type,
+}: {
+  data: any[];
+  refetch: () => void;
+  type: string;
+}) {
+  const pinnedRowRef = useRef({});
+
+  useEffect(() => {
+    logseq.Editor.exitEditingMode();
+  }, []);
+
+  const rows = useMemo(() => {
+    if (data) {
+      return data
+        .map(({ properties, ...rest }) => {
+          if (!rest.content || !rest.uuid || !rest.page) {
+            return null;
+          }
+          const isPage = Boolean(rest["preBlock?"]);
+          return {
+            ...properties,
+            blockTitle:
+              properties.label ||
+              properties.name ||
+              properties.title ||
+              (isPage ? rest.page?.name : rest.content.split("\n")[0]),
+            block: rest,
+            content: rest.content,
+            page: rest.page.name,
+          };
+        })
+        .filter(Boolean);
+    } else {
+      return [];
+    }
+  }, [data]);
+
+  const columnDefs = useMemo(() => {
+    const hiddenFields = [
+      "is",
+      "title",
+      "content",
+      "alias",
+      "icon",
+      "page",
+      "banner",
+      "name",
+      "label",
+    ];
+    const notEditable = ["blockTitle", "block", "page", "is", "content"];
+    const columnKeys = new Set<string>();
+    rows.forEach((r) => Object.keys(r).forEach((k) => columnKeys.add(k)));
+    columnKeys.delete("block");
+    const columnDefs = [...columnKeys].map((k) => {
+      return {
+        field: k,
+        valueSetter: (params) => {
+          if (!params.node.rowPinned) {
+            logseq.Editor.upsertBlockProperty(
+              params.data.block.uuid,
+              k,
+              params.newValue
+            ).then(() => {
+              logseq.Editor.exitEditingMode();
+            });
+            params.data[k] = params.newValue;
+            return true;
+          } else {
+            pinnedRowRef.current[k] = params.newValue;
+            return true;
+          }
+        },
+        hide: hiddenFields.includes(k),
+        cellRenderer: k === "blockTitle" ? "agGroupCellRenderer" : undefined,
+        pinned: k === "blockTitle" ? "left" : undefined,
+        width: k === "blockTitle" ? 300 : undefined,
+        headerName: k === "blockTitle" ? "Block" : k,
+        editable: (params) => {
+          if (params.node.rowPinned) {
+            return true;
+          } else {
+            return !notEditable.includes(k);
+          }
+        },
+      };
+    });
+
+    return columnDefs;
+  }, [rows]);
+  return (
+    <Table
+      activeType={type}
+      pinnedRowRef={pinnedRowRef}
+      columnDefs={columnDefs}
+      rowData={rows}
+      refetch={refetch}
+    />
+  );
+}
+
+function DataPage({ type }: { type: string }) {
+  const { data, refetch } = useQuery(`(property is "${type}")`);
+  if (data) {
+    return <DataTable data={data} refetch={refetch} type={type} />;
+  } else {
+    return null;
+  }
+}
+
 function DelayedTable() {
   const [show, setShow] = useState(false);
   useEffect(() => {
     setShow(true);
   }, []);
 
-  const [data, setData] = useState([] as any[]);
-  const [types, setTypes] = useState([] as any[]);
-  const [activeType, setActiveType] = useState(null);
-
-  useEffect(() => {
-    async function execute() {
-      try {
-        const res = await logseq.DB.q("(property is)");
-        const data = res!.map(({ properties, ...rest }) => ({
-          blockTitle:
-            properties.title ||
-            properties.name ||
-            properties.label ||
-            rest.content.split("\n")[0],
-          ...properties,
-          block: rest,
-          content: rest.content,
-        }));
-        const types = new Set();
-        data.forEach((d) => {
-          d.is.forEach((t) => types.add(t));
-        });
-        setTypes([...types]);
-        setActiveType([...types][0]);
-        setData(data);
-      } catch (e) {
-        console.error(e);
-      }
+  const [activeType, setActiveType] = useState<string>();
+  const { data } = useQuery(`(property is)`);
+  const types = useMemo(() => {
+    if (data) {
+      const types = new Set<string>();
+      data.forEach((d) => {
+        if (d.properties.is.forEach) {
+          d.properties.is.forEach((t) => types.add(t));
+        } else if (d.properties.is) {
+          types.add(d.properties.is);
+        }
+      });
+      setActiveType([...types][0]);
+      return [...types] as string[];
+    } else {
+      return [];
     }
-    execute();
-  }, []);
+  }, [data]);
 
-  const [rowData, columnDefs] = useMemo(() => {
-    const rows = data.filter(({ is }) => is.includes(activeType));
-    const columnKeys = new Set();
-    rows.forEach((r) => Object.keys(r).forEach((k) => columnKeys.add(k)));
-    columnKeys.delete("block");
-    const columnDefs = [...columnKeys].map((k) => ({
-      field: k,
-      hide: ["is", "title", "content"].includes(k),
-    }));
-    if (columnDefs.length >= 1) {
-      columnDefs[0].cellRenderer = "agGroupCellRenderer";
-    }
-    return [rows, columnDefs];
-  }, [data, activeType]);
-
-  if (show) {
+  if (show && activeType) {
     return (
       <div>
-        <div>
-          {types.map((t) => (
-            <button
-              style={{ margin: 8, color: "white" }}
-              key={t}
-              onClick={() => setActiveType(t)}
-            >
-              {t}
-            </button>
-          ))}
+        <div style={{ height: 72, background: "black" }}>
+          <div
+            onClick={() => window.logseq.hideMainUI()}
+            style={{ width: "100%", height: 32 }}
+          />
+          <div style={{ marginLeft: 8 }}>
+            {types.map((t) => (
+              <button
+                style={{ margin: 8, color: "white" }}
+                key={t}
+                onClick={() => setActiveType(t)}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
         </div>
-        <Table columnDefs={columnDefs} rowData={rowData} />
+        <DataPage type={activeType} />
       </div>
     );
   } else {
@@ -155,22 +325,12 @@ function DelayedTable() {
 }
 
 function App() {
-  const innerRef = useRef<HTMLDivElement>(null);
   const visible = useAppVisible();
 
   if (visible) {
     return (
-      <main
-        className="backdrop-filter backdrop-blur-md fixed inset-0 flex items-center justify-center"
-        onClick={(e) => {
-          if (!innerRef.current?.contains(e.target as any)) {
-            window.logseq.hideMainUI();
-          }
-        }}
-      >
-        <div ref={innerRef}>
-          <DelayedTable />
-        </div>
+      <main className="fixed inset-0 flex items-center justify-center">
+        <DelayedTable />
       </main>
     );
   }
