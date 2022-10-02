@@ -4,12 +4,132 @@ import React, {
   useEffect,
   useMemo,
   useCallback,
+  useLayoutEffect,
+  forwardRef,
+  useImperativeHandle,
 } from "react";
 import { useAppVisible } from "./utils";
 import { AgGridReact } from "ag-grid-react";
-
+import { useThemeMode } from "./logseqHooks";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
+import { initial } from "lodash";
+import { Color } from "ag-grid-community";
+import { ColDef } from "ag-grid-community/dist/lib/entities/colDef";
+
+function closeAndOpenBlock(uuid) {
+  logseq.hideMainUI();
+  logseq.Editor.openInRightSidebar(uuid);
+}
+
+function useQuery(dsl: string) {
+  const [data, setData] = useState<any[]>();
+  const refetch = useCallback(() => {
+    logseq.DB.q(dsl).then((data) => {
+      //@ts-ignore
+      setData(data);
+    });
+  }, [dsl]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+  return { data, refetch };
+}
+
+function useBlock(uuid: string) {
+  const [data, setData] = useState<any[]>();
+  const refetch = useCallback(() => {
+    logseq.Editor.getBlock(uuid).then((data) => {
+      //@ts-ignore
+      setData(data);
+    });
+  }, [uuid]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+  return { data, refetch };
+}
+
+function useParamsBlockUUID(pageName) {
+  const [uuid, setUUID] = useState<string>();
+  useEffect(() => {
+    logseq.Editor.getPageBlocksTree(pageName).then((data) => {
+      const paramBlock = data.find(({ left, page }) => left.id === page.id);
+      if (paramBlock) {
+        setUUID(paramBlock.uuid);
+      } else {
+        throw new Error("couldn't find block to store params");
+      }
+    });
+  }, [pageName]);
+  return uuid;
+}
+
+function usePageProperty(pageName: string, property: string, initial = "") {
+  const [value, setValue] = useState<string>(initial);
+  const blockID = useParamsBlockUUID(pageName);
+  useEffect(() => {
+    if (blockID) {
+      logseq.Editor.getBlockProperty(blockID, property).then((propValue) => {
+        if (propValue && typeof propValue === "string") {
+          setValue(propValue);
+        }
+      });
+    }
+  }, [property, blockID, initial]);
+
+  useEffect(() => {
+    if (blockID) {
+      return logseq.DB.onBlockChanged(blockID, (v) => {
+        setValue(v.properties[property]);
+      });
+    }
+  }, [blockID, property]);
+
+  const setPropValue = useCallback(
+    (newVal) => {
+      if (blockID) {
+        logseq.Editor.upsertBlockProperty(blockID, property, newVal).then(() =>
+          logseq.Editor.exitEditingMode()
+        );
+      }
+    },
+    [blockID, property]
+  );
+  return [value, setPropValue] as [typeof value, typeof setPropValue];
+}
+
+function usePageProperties(pageName: string) {
+  const [value, setValue] = useState<any>();
+  const blockID = useParamsBlockUUID(pageName);
+  useEffect(() => {
+    if (blockID) {
+      logseq.Editor.getBlockProperties(blockID).then((properties) => {
+        setValue({ ...properties });
+      });
+    }
+  }, [blockID]);
+
+  useEffect(() => {
+    if (blockID) {
+      return logseq.DB.onBlockChanged(blockID, (v) => {
+        setValue({ ...v.properties });
+      });
+    }
+  }, [blockID]);
+
+  const setPropValue = useCallback(
+    (key, newVal) => {
+      if (blockID) {
+        logseq.Editor.upsertBlockProperty(blockID, key, newVal).then(() =>
+          logseq.Editor.exitEditingMode()
+        );
+      }
+    },
+    [blockID]
+  );
+  return [value, setPropValue] as [typeof value, typeof setPropValue];
+}
 
 function Table({
   columnDefs,
@@ -69,14 +189,12 @@ function Table({
     },
     [refetch]
   );
+  const themeMode = useThemeMode();
 
   return (
     <div
       className={
-        window.matchMedia &&
-        window.matchMedia("(prefers-color-scheme: dark)").matches
-          ? "ag-theme-alpine-dark"
-          : "ag-theme-alpine"
+        themeMode === "dark" ? "ag-theme-alpine-dark" : "ag-theme-alpine"
       }
       style={{ width: "100vw", height: "calc(100vh - 72px)" }}
     >
@@ -95,6 +213,7 @@ function Table({
           console.log("pinnedRowDataChanged", args);
         }}
         onCellKeyPress={(e) => {
+          //@ts-ignore
           if (e?.event?.keyCode === 13 && e?.rowPinned) {
             const { blockTitle, ...rest } = pinnedRowRef.current;
             const text =
@@ -106,6 +225,7 @@ function Table({
             logseq.Editor.appendBlockInPage(activeType, text).then(() => {
               refetch();
               pinnedRowRef.current = {};
+              //@ts-ignore
               gridRef?.current?.api?.setPinnedTopRowData([
                 pinnedRowRef.current,
               ]);
@@ -144,19 +264,161 @@ function Table({
   );
 }
 
-function useQuery(dsl: string) {
-  const [data, setData] = useState<any[]>();
-  const refetch = useCallback(() => {
-    logseq.DB.q(dsl).then((data) => {
-      //@ts-ignore
-      setData(data);
-    });
-  }, [dsl]);
+const NumberCellRenderer = ({ value }) => {
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      <div
+        style={{
+          textAlign: "right",
+          fontFamily: "monospace",
+          fontWeight: "bold",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+};
+
+const NumberCellEditor = forwardRef((props: { value: string }, ref) => {
+  const [value, setValue] = useState(parseInt(props.value));
+  const refInput = useRef(null);
   useEffect(() => {
-    refetch();
-  }, [refetch]);
-  return { data, refetch };
+    refInput.current.focus();
+  }, []);
+  useImperativeHandle(ref, () => {
+    return {
+      getValue: () => value,
+      isCancelBeforeStart: () => false,
+      isCancelAfterEnd: () => false,
+    };
+  });
+
+  return (
+    <input
+      type="number"
+      ref={refInput}
+      value={value}
+      onChange={(event) => setValue(Number(event.target.value))}
+      style={{
+        width: "100%",
+        textAlign: "right",
+        fontFamily: "monospace",
+        fontWeight: "bold",
+      }}
+    />
+  );
+});
+
+function parseBlock(block) {
+  return {
+    properties: block.properties,
+    content: block.content,
+    uuid: block.uuid,
+    page: block.page?.name,
+    blockTitle:
+      block.properties?.label ||
+      block.properties?.name ||
+      block.properties?.title ||
+      (block["preBlock?"] ? block.page?.name : block.content?.split("\n")[0]),
+  };
 }
+
+const RefCellRenderer = ({ value }) => {
+  const { data } = useBlock(
+    value &&
+      value.includes("((") &&
+      value.includes("))") &&
+      value.split("((")[1].split("))")[0]
+  );
+  if (data) {
+    return <div>{parseBlock(data).blockTitle}</div>;
+  } else {
+    return null;
+  }
+};
+
+const RefCellEditor = forwardRef(
+  (props: { value: string; type: string }, ref) => {
+    const [value, setValue] = useState(
+      props.value &&
+        props.value.includes("((") &&
+        props.value.includes("))") &&
+        props.value.split("((")[1].split("))")[0]
+    );
+
+    const refInput = useRef(null);
+    const { data } = useQuery(`(property is "${props.type}")`);
+    const options = data && data.map(parseBlock);
+
+    useEffect(() => {
+      refInput.current.focus();
+    }, []);
+
+    useImperativeHandle(ref, () => {
+      return {
+        getValue: () => {
+          logseq.Editor.upsertBlockProperty(value, "id", value);
+          return "((" + value + "))";
+        },
+        isCancelBeforeStart: () => false,
+        isCancelAfterEnd: () => false,
+      };
+    });
+
+    return (
+      <select
+        ref={refInput}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        style={{ marginLeft: 12, width: "calc(100% - 24px)" }}
+      >
+        {options &&
+          options.map((o) => (
+            <option key={o.uuid} value={o.uuid}>
+              {o.blockTitle}
+            </option>
+          ))}
+      </select>
+    );
+  }
+);
+
+const DateCellEditor = forwardRef((props: { value: string }, ref) => {
+  const [value, setValue] = useState(
+    props.value &&
+      props.value.includes("[[") &&
+      props.value.includes("]]") &&
+      props.value.split("[[")[1].split("]]")[0]
+  );
+  const refInput = useRef(null);
+
+  useEffect(() => {
+    refInput.current.focus();
+  }, []);
+
+  useImperativeHandle(ref, () => {
+    return {
+      getValue: () => "[[" + value + "]]",
+      isCancelBeforeStart: () => false,
+      isCancelAfterEnd: () => false,
+    };
+  });
+
+  return (
+    <input
+      type="date"
+      ref={refInput}
+      value={value}
+      onChange={(event) => setValue(event.target.value)}
+      style={{ width: "100%" }}
+    />
+  );
+});
+
+const DateCellRenderer = ({ value }) => {
+  return <div>{value}</div>;
+};
 
 function DataTable({
   data,
@@ -172,6 +434,20 @@ function DataTable({
   useEffect(() => {
     logseq.Editor.exitEditingMode();
   }, []);
+
+  const [pageProperties, setPageProperty] = usePageProperties(type);
+
+  const fieldProperties = useMemo(
+    () =>
+      pageProperties
+        ? Object.fromEntries(
+            Object.entries(pageProperties)
+              .filter(([key]) => key.startsWith("field."))
+              .map(([key, value]) => [key.replace("field.", ""), value])
+          )
+        : {},
+    [pageProperties]
+  );
 
   const rows = useMemo(() => {
     if (data) {
@@ -210,13 +486,16 @@ function DataTable({
       "banner",
       "name",
       "label",
+      "id",
     ];
     const notEditable = ["blockTitle", "block", "page", "is", "content"];
     const columnKeys = new Set<string>();
     rows.forEach((r) => Object.keys(r).forEach((k) => columnKeys.add(k)));
+    fieldProperties &&
+      Object.keys(fieldProperties).forEach((k) => columnKeys.add(k));
     columnKeys.delete("block");
-    const columnDefs = [...columnKeys].map((k) => {
-      return {
+    const columnDefs = [...columnKeys].map((k): ColDef<any> => {
+      const commonColDefs: ColDef<any> = {
         field: k,
         valueSetter: (params) => {
           if (!params.node.rowPinned) {
@@ -235,10 +514,7 @@ function DataTable({
           }
         },
         hide: hiddenFields.includes(k),
-        cellRenderer: k === "blockTitle" ? "agGroupCellRenderer" : undefined,
-        pinned: k === "blockTitle" ? "left" : undefined,
-        width: k === "blockTitle" ? 300 : undefined,
-        headerName: k === "blockTitle" ? "Block" : k,
+        headerName: k,
         editable: (params) => {
           if (params.node.rowPinned) {
             return true;
@@ -247,10 +523,164 @@ function DataTable({
           }
         },
       };
+      let type;
+      let inputValues: string[];
+      if (k === "blockTitle") {
+        type = "blockTitle";
+      } else if (fieldProperties[k]) {
+        const fieldConfig = fieldProperties[k] as string;
+        const inputType = fieldConfig.split(" ")[0].split("(")[0];
+        inputValues = fieldConfig.split("(")[1]?.split(")")[0]?.split(";");
+        type = inputType;
+      } else {
+        type = "default";
+      }
+
+      switch (type) {
+        case "blockTitle":
+          return {
+            ...commonColDefs,
+            pinned: "left",
+            width: 300,
+            headerName: "Block",
+            cellRenderer: "agGroupCellRenderer",
+          };
+        case "text": {
+          return {
+            ...commonColDefs,
+            cellRenderer: ({ value }) => {
+              return <div>{value}</div>;
+            },
+          };
+        }
+        case "longtext": {
+          return {
+            ...commonColDefs,
+            cellEditorPopup: true,
+            cellEditor: "agLargeTextCellEditor",
+            cellRenderer: ({ value }) => {
+              return <div>{value}</div>;
+            },
+          };
+        }
+        case "ref":
+          return {
+            ...commonColDefs,
+            cellEditor: RefCellEditor,
+            cellRenderer: RefCellRenderer,
+            cellEditorParams: {
+              type: inputValues[0],
+            },
+          };
+        case "select": {
+          return {
+            ...commonColDefs,
+            cellEditor: "agSelectCellEditor",
+            cellEditorParams: {
+              values: inputValues,
+            },
+            cellRenderer: ({ value }) => {
+              return (
+                <div style={{ display: "flex", alignItems: "center" }}>
+                  {value && (
+                    <div
+                      style={{
+                        backgroundColor: "#aaaaaa55",
+                        paddingLeft: 4,
+                        paddingRight: 4,
+                        borderRadius: 6,
+                        marginTop: 4,
+                        height: 32,
+                        marginBottom: 2,
+                      }}
+                    >
+                      {value}
+                    </div>
+                  )}
+                </div>
+              );
+            },
+          };
+        }
+        case "url": {
+          return {
+            ...commonColDefs,
+            cellRenderer: ({ value }) => {
+              return (
+                <a
+                  style={{ textDecoration: "underline" }}
+                  target="_blank"
+                  rel="nofollow noreferrer"
+                  href={value}
+                >
+                  {value}
+                </a>
+              );
+            },
+          };
+        }
+        case "color": {
+          return {
+            ...commonColDefs,
+            cellRenderer: ({ value }) => {
+              return (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    fontFamily: "monospace",
+                  }}
+                >
+                  <div
+                    style={{
+                      backgroundColor: value,
+                      width: 20,
+                      height: 20,
+                      marginRight: 8,
+                    }}
+                  />
+                  <div>{value}</div>
+                </div>
+              );
+            },
+          };
+        }
+        case "number": {
+          return {
+            ...commonColDefs,
+            cellEditor: NumberCellEditor,
+            cellRenderer: NumberCellRenderer,
+          };
+        }
+        case "date": {
+          return {
+            ...commonColDefs,
+            cellEditor: DateCellEditor,
+            cellRenderer: DateCellRenderer,
+          };
+        }
+        case "image": {
+          return {
+            ...commonColDefs,
+            cellRenderer: ({ value }) => {
+              return (
+                <div>
+                  <img
+                    src={value}
+                    style={{ width: "100%", height: 40, objectFit: "contain" }}
+                  />
+                </div>
+              );
+            },
+          };
+        }
+        default:
+          return commonColDefs;
+      }
     });
 
     return columnDefs;
-  }, [rows]);
+  }, [rows, fieldProperties]);
   return (
     <Table
       activeType={type}
@@ -264,8 +694,13 @@ function DataTable({
 
 function DataPage({ type }: { type: string }) {
   const { data, refetch } = useQuery(`(property is "${type}")`);
+
   if (data) {
-    return <DataTable data={data} refetch={refetch} type={type} />;
+    return (
+      <div>
+        <DataTable data={data} refetch={refetch} type={type} />
+      </div>
+    );
   } else {
     return null;
   }
